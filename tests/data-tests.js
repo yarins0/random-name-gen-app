@@ -4,7 +4,7 @@ const { faker } = require('@faker-js/faker');
 const {
     setPerson, getPersons, getPerson,
 } = require('../data/index');
-const {getConnection, getConnectionUrlSync} = require('../data/connection')
+const {getConnection, closeConnection, getConnectionUrlSync} = require('../data/connection')
 const expect = require('chai').expect;
 const describe = require('mocha').describe;
 const it = require('mocha').it;
@@ -40,5 +40,11 @@ describe('Data Tests', () => {
         expect(person.id).to.eq(persons[0].id.toString());
 
     }).timeout(5000);
+
+    // Without this, the shared connection stays open and mocha (run without --exit)
+    // hangs waiting for the event loop to drain instead of exiting.
+    after(async () => {
+        await closeConnection();
+    });
 
 })
