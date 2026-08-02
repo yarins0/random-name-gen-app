@@ -72,6 +72,7 @@ typings/
 .yarn-integrity
 
 # dotenv environment variables file
+secrets/
 .env
 .env.test
 
@@ -105,3 +106,25 @@ dist
 
 # TernJS port file
 .tern-port
+
+# Session handoff notes
+HANDOFF.md
+CLAUDE.md
+.claude/
+
+docs/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfplan
+plan_output.log

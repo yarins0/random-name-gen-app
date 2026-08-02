@@ -19,7 +19,6 @@ describe('Data Tests', () => {
     it('Can connect to DB', async () => {
         const connection = await getConnection();
         expect(connection).to.be.an('object');
-        connection.disconnect();
 
     }).timeout(5000);
 

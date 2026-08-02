@@ -1,0 +1,43 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-north-1
+  ECR_REPOSITORY: 592404497449.dkr.ecr.eu-north-1.amazonaws.com/namegen
+  EKS_CLUSTER_NAME: namegen
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::592404497449:role/namegen-github-actions-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        run: |
+          docker build -t $ECR_REPOSITORY:$GITHUB_SHA -t $ECR_REPOSITORY:latest .
+          docker push $ECR_REPOSITORY:$GITHUB_SHA
+          docker push $ECR_REPOSITORY:latest
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION
+
+      # Tagged with $GITHUB_SHA (not just :latest) so this actually changes the pod spec
+      # and triggers a real rollout, instead of a no-op image reference update.
+      - name: Roll out new image
+        run: |
+          kubectl set image deployment/namegen namegen=$ECR_REPOSITORY:$GITHUB_SHA
+          kubectl rollout status deployment/namegen

@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: namegen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: namegen
+  template:
+    metadata:
+      labels:
+        app: namegen
+    spec:
+      containers:
+        - name: namegen
+          image: 592404497449.dkr.ecr.eu-north-1.amazonaws.com/namegen:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: namegen-secrets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: namegen
+  annotations:
+    # EKS Auto Mode built-in load-balancing capability (not the standalone AWS LB Controller add-on).
+    # Confirmed against AWS docs: https://docs.aws.amazon.com/eks/latest/userguide/auto-configure-nlb.html
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+spec:
+  type: LoadBalancer
+  # eks.amazonaws.com/nlb is the Auto Mode default and could be omitted, but set explicitly per AWS's sample.
+  loadBalancerClass: eks.amazonaws.com/nlb
+  selector:
+    app: namegen
+  ports:
+    - port: 8080
+      targetPort: 8080
