@@ -30,10 +30,14 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
     }
 
     # Restricts token exchange to pushes on main in this exact repo (not PRs, not other repos).
+    # This account uses immutable OIDC subject claims (owner/repo numeric IDs baked into `sub`,
+    # confirmed via `gh api repos/yarins0/random-name-gen-app/actions/oidc/customization/sub` and
+    # the CloudTrail record of the first, rejected AssumeRoleWithWebIdentity call), not the plain
+    # "owner/repo" name form most tutorials assume.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:yarins0/random-name-gen-app:ref:refs/heads/main"]
+      values   = ["repo:yarins0@160392523/random-name-gen-app@1320105468:ref:refs/heads/main"]
     }
   }
 }
