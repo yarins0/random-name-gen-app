@@ -111,8 +111,7 @@ dist
 HANDOFF.md
 CLAUDE.md
 .claude/
-
-docs/
+PLAN.md
 
 # Terraform
 **/.terraform/
