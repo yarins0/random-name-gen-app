@@ -14,7 +14,6 @@ REGION="eu-north-1"
 CLUSTER_NAME="namegen"
 APP_SERVICE="namegen"
 TFSTATE_BUCKET="namegen-tfstate-592404497449"
-TFSTATE_LOCK_TABLE="namegen-tfstate-lock"
 IAM_USER="namegen-terraform"
 
 read -r -p "This will DESTROY all namegen AWS resources (EKS cluster, VPC, ECR, state backend, IAM user). Type 'destroy' to continue: " CONFIRM
@@ -35,7 +34,9 @@ if aws eks describe-cluster --name "$CLUSTER_NAME" --region "$REGION" >/dev/null
   exit 1
 fi
 
-echo "==> Emptying and deleting the Terraform state S3 bucket (must be last of the state-backend resources)"
+echo "==> Emptying and deleting the Terraform state S3 bucket (the only state-backend resource)"
+# The backend uses S3-native locking (use_lockfile), so the .tflock object lives in this
+# same bucket and is removed by the version purge below — there is no DynamoDB table to delete.
 # The bucket has versioning enabled, so a plain `s3 rm --recursive` only clears current-version
 # objects and leaves old versions + delete markers behind — delete-bucket then fails with
 # BucketNotEmpty (hit this during the real teardown). Purge every version and delete marker first.
@@ -50,9 +51,6 @@ if [[ "$(echo "$MARKERS_JSON" | grep -c '"Key"')" -gt 0 ]]; then
   aws s3api delete-objects --bucket "$TFSTATE_BUCKET" --region "$REGION" --delete "$MARKERS_JSON" >/dev/null
 fi
 aws s3api delete-bucket --bucket "$TFSTATE_BUCKET" --region "$REGION"
-
-echo "==> Deleting the Terraform state lock DynamoDB table"
-aws dynamodb delete-table --table-name "$TFSTATE_LOCK_TABLE" --region "$REGION" >/dev/null
 
 echo "==> Removing $IAM_USER from any IAM groups (delete-user requires zero group memberships)"
 for GROUP in $(aws iam list-groups-for-user --user-name "$IAM_USER" --query 'Groups[].GroupName' --output text); do
@@ -75,4 +73,4 @@ if ! aws iam delete-user --user-name "$IAM_USER" 2>/tmp/namegen-delete-user-err.
 fi
 rm -f /tmp/namegen-delete-user-err.log
 
-echo "==> Teardown complete. Manually spot-check the AWS console (EKS, EC2, ELB, ECR, S3, DynamoDB, IAM, Billing) for anything left over."
+echo "==> Teardown complete. Manually spot-check the AWS console (EKS, EC2, ELB, ECR, S3, IAM, Billing) for anything left over."

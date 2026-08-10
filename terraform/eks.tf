@@ -2,11 +2,12 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
 
-  name               = local.cluster_name
-  kubernetes_version = "1.33"
+  name               = var.cluster_name
+  kubernetes_version = var.kubernetes_version
 
   # Short-lived demo cluster reachable from a laptop via kubectl — no VPN/bastion.
-  endpoint_public_access = true
+  endpoint_public_access       = true
+  endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
 
   # Grants the applying IAM identity (namegen-terraform) cluster-admin via an EKS access entry,
   # so `aws eks update-kubeconfig` + kubectl work immediately after apply with no extra IAM wiring.
@@ -35,9 +36,5 @@ module "eks" {
         }
       }
     }
-  }
-
-  tags = {
-    Project = "namegen"
   }
 }

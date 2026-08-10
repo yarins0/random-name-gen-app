@@ -1,5 +1,6 @@
 terraform {
-  required_version = ">= 1.6.0"
+  # >= 1.11 is required by backend.tf's `use_lockfile` (S3-native state locking).
+  required_version = ">= 1.11"
 
   required_providers {
     aws = {
@@ -8,13 +9,18 @@ terraform {
       # Deliberate deviation from "pin to a recent 5.x": provider 5.x can't satisfy that, so init would fail.
       version = "~> 6.52"
     }
-    tls = {
-      source  = "hashicorp/tls"
-      version = "~> 4.0"
-    }
   }
 }
 
 provider "aws" {
-  region = "eu-north-1"
+  region = var.region
+
+  # Applied to every taggable resource in this stack, so individual resources
+  # and modules no longer repeat a `tags` block.
+  default_tags {
+    tags = {
+      Project   = var.project
+      ManagedBy = "terraform"
+    }
+  }
 }

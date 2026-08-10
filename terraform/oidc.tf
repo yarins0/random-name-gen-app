@@ -1,16 +1,10 @@
-# Thumbprint of GitHub's OIDC issuer cert chain, required by aws_iam_openid_connect_provider.
-data "tls_certificate" "github_actions" {
-  url = "https://token.actions.githubusercontent.com"
-}
-
+# No thumbprint_list: it is Optional, and AWS ignores configured thumbprints for GitHub
+# (it validates against its own library of trusted root CAs instead). Omitting it also removes
+# the data source that fetched the issuer cert over the network on every plan.
+# The hashicorp/tls provider stays in the lock file regardless — the EKS module depends on it.
 resource "aws_iam_openid_connect_provider" "github_actions" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [data.tls_certificate.github_actions.certificates[0].sha1_fingerprint]
-
-  tags = {
-    Project = "namegen"
-  }
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
 }
 
 data "aws_iam_policy_document" "github_actions_assume_role" {
@@ -30,25 +24,18 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
     }
 
     # Restricts token exchange to pushes on main in this exact repo (not PRs, not other repos).
-    # This account uses immutable OIDC subject claims (owner/repo numeric IDs baked into `sub`,
-    # confirmed via `gh api repos/yarins0/random-name-gen-app/actions/oidc/customization/sub` and
-    # the CloudTrail record of the first, rejected AssumeRoleWithWebIdentity call), not the plain
-    # "owner/repo" name form most tutorials assume.
+    # See var.github_actions_subject for why this uses the immutable numeric-ID claim form.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:yarins0@160392523/random-name-gen-app@1320105468:ref:refs/heads/main"]
+      values   = [var.github_actions_subject]
     }
   }
 }
 
 resource "aws_iam_role" "github_actions_deploy" {
-  name               = "namegen-github-actions-deploy"
+  name               = "${var.project}-github-actions-deploy"
   assume_role_policy = data.aws_iam_policy_document.github_actions_assume_role.json
-
-  tags = {
-    Project = "namegen"
-  }
 }
 
 data "aws_iam_policy_document" "github_actions_deploy" {
@@ -83,7 +70,7 @@ data "aws_iam_policy_document" "github_actions_deploy" {
 }
 
 resource "aws_iam_role_policy" "github_actions_deploy" {
-  name   = "namegen-deploy"
+  name   = "${var.project}-deploy"
   role   = aws_iam_role.github_actions_deploy.id
   policy = data.aws_iam_policy_document.github_actions_deploy.json
 }

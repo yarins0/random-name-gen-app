@@ -20,7 +20,7 @@ flowchart TB
         end
         ECR["ECR repo: namegen"]
         OIDC["IAM Role: namegen-github-actions-deploy<br/>(OIDC federated, no stored keys)"]
-        TFState["S3 + DynamoDB<br/>Terraform remote state"]
+        TFState["S3<br/>Terraform remote state<br/>(native locking)"]
     end
     User(["Browser"]) -->|":8080"| NLB
     ECR -.->|"image pull"| App
@@ -81,18 +81,15 @@ aws s3api create-bucket --bucket <unique-bucket-name> --region <region> \
 aws s3api put-bucket-versioning --bucket <unique-bucket-name> \
   --versioning-configuration Status=Enabled
 
-aws dynamodb create-table --table-name <lock-table-name> \
-  --attribute-definitions AttributeName=LockID,AttributeType=S \
-  --key-schema AttributeName=LockID,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST
-
 aws iam create-user --user-name <terraform-iam-user>
 aws iam attach-user-policy --user-name <terraform-iam-user> \
   --policy-arn arn:aws:iam::aws:policy/AdministratorAccess   # scope down for anything long-lived
 aws iam create-access-key --user-name <terraform-iam-user>   # configure these as your active AWS credentials
 ```
 
-Update the bucket/table names in `terraform/backend.tf` to match.
+No DynamoDB lock table is needed — the backend uses S3-native state locking (`use_lockfile`, Terraform 1.11+), which stores the lock as an object in the same bucket.
+
+Update the bucket name in `terraform/backend.tf` to match. Every other value (region, cluster name, Kubernetes version, CIDRs, the OIDC subject) is a variable in `terraform/variables.tf` — override the defaults there or with `-var`.
 
 ### 2. Provision the infrastructure
 
@@ -138,9 +135,9 @@ Everything provisioned above is destroyable. `teardown.sh` (repo root) automates
 ./teardown.sh   # prompts for confirmation before doing anything
 ```
 
-Order: delete the `LoadBalancer` Service (deprovisions the NLB) → `terraform destroy` (cluster, VPC, ECR, OIDC role) → empty + delete the S3 state bucket → delete the DynamoDB lock table → delete the bootstrap IAM user's access key and the user itself.
+Order: delete the `LoadBalancer` Service (deprovisions the NLB) → `terraform destroy` (cluster, VPC, ECR, OIDC role) → empty + delete the S3 state bucket → delete the bootstrap IAM user's access key and the user itself.
 
-After running it, spot-check the AWS Console (EKS, EC2/ELB, ECR, S3, DynamoDB, IAM, and Billing/Cost Explorer) to confirm nothing billable is left.
+After running it, spot-check the AWS Console (EKS, EC2/ELB, ECR, S3, IAM, and Billing/Cost Explorer) to confirm nothing billable is left.
 
 ## Repo Layout
 
