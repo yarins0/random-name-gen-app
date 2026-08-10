@@ -1,0 +1,60 @@
+# Helm values for prometheus-community/kube-prometheus-stack on EKS Auto Mode.
+# Install steps and dashboard import are in k8s/monitoring/README.md.
+#
+# Storage note: every PVC below uses "ebs-sc", the StorageClass defined in k8s/mongo.yaml.
+# EKS Auto Mode registers only the ebs.csi.eks.amazonaws.com driver and creates no
+# StorageClass for it, so ebs-sc must exist before this chart is installed.
+
+prometheus:
+  prometheusSpec:
+    # 7 days is enough to demo trends without growing the volume during a short-lived cluster.
+    retention: 7d
+
+    # Discover ServiceMonitors/PodMonitors in every namespace, not only those carrying
+    # the chart's own release label. Without this a future app ServiceMonitor is ignored.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: ebs-sc
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+grafana:
+  # No password here on purpose — a committed credential is a leaked credential.
+  # The chart's default admin password is "prom-operator"; override it at install time with
+  #   --set grafana.adminPassword='<value>'
+  # or point adminPassword at an existing Secret. See k8s/monitoring/README.md.
+
+  persistence:
+    enabled: true
+    storageClassName: ebs-sc
+    size: 5Gi
+
+  # Watches for ConfigMaps labelled grafana_dashboard="1" and loads them as dashboards,
+  # which is how namegen-dashboard.json reaches Grafana without a manual UI import.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+
+  # ClusterIP keeps Grafana off the public internet; reach it with `kubectl port-forward`.
+  # Switching this to LoadBalancer would provision a second billable NLB and expose the
+  # login page publicly, so it stays internal.
+  service:
+    type: ClusterIP
+
+# Not required by the project spec, and it would add a third StatefulSet plus another
+# EBS volume. Prometheus alerting rules still evaluate; they just have no receiver.
+alertmanager:
+  enabled: false
