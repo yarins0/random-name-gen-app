@@ -13,6 +13,7 @@ set -euo pipefail
 REGION="eu-north-1"
 CLUSTER_NAME="namegen"
 APP_SERVICE="namegen"
+MONITORING_NS="monitoring"
 TFSTATE_BUCKET="namegen-tfstate-592404497449"
 IAM_USER="namegen-terraform"
 
@@ -24,6 +25,20 @@ fi
 
 echo "==> Deleting the app's LoadBalancer Service first, so the NLB deprovisions before the cluster does"
 kubectl delete svc "$APP_SERVICE" --ignore-not-found
+
+echo "==> Removing the Prometheus/Grafana stack, if it is installed"
+if command -v helm >/dev/null 2>&1; then
+  helm uninstall monitoring --namespace "$MONITORING_NS" 2>/dev/null || true
+fi
+
+# EBS volumes for dynamically provisioned PVCs are created by the CSI driver, not by
+# Terraform, so `terraform destroy` does not know about them. Deleting the cluster with
+# PVCs still present orphans their volumes, which keep billing indefinitely. Delete the
+# PVCs while the cluster is alive so the CSI driver reclaims the volumes first.
+echo "==> Deleting PersistentVolumeClaims so their EBS volumes are reclaimed (not orphaned)"
+kubectl delete pvc --all --namespace "$MONITORING_NS" --ignore-not-found --timeout=5m || true
+kubectl delete pvc --all --namespace default --ignore-not-found --timeout=5m || true
+kubectl delete namespace "$MONITORING_NS" --ignore-not-found --timeout=5m || true
 
 echo "==> terraform destroy (cluster, VPC, ECR repo, and any OIDC/IAM role Phase 3 added to this state)"
 (cd terraform && terraform destroy -auto-approve)
@@ -73,4 +88,5 @@ if ! aws iam delete-user --user-name "$IAM_USER" 2>/tmp/namegen-delete-user-err.
 fi
 rm -f /tmp/namegen-delete-user-err.log
 
-echo "==> Teardown complete. Manually spot-check the AWS console (EKS, EC2, ELB, ECR, S3, IAM, Billing) for anything left over."
+echo "==> Teardown complete. Manually spot-check the AWS console (EKS, EC2 incl. Volumes, ELB, ECR, S3, IAM, Billing) for anything left over."
+echo "    Check EC2 > Volumes specifically: orphaned EBS volumes from PVCs are the most common leftover cost."
