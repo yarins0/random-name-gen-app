@@ -1,10 +1,33 @@
-# random-name-gen-app
+# 🎲 random-name-gen-app
+
+[![Terraform](https://img.shields.io/badge/Terraform-1.11+-7B42BC?logo=terraform&logoColor=white)](terraform/)
+[![AWS EKS](https://img.shields.io/badge/AWS-EKS%20Auto%20Mode-ED7100?logo=amazonaws&logoColor=white)](terraform/eks.tf)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-1.33-326CE5?logo=kubernetes&logoColor=white)](k8s/)
+[![Docker](https://img.shields.io/badge/Docker-node%3A24--alpine-2496ED?logo=docker&logoColor=white)](Dockerfile)
+[![GitHub Actions](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions%20%2B%20OIDC-2088FF?logo=githubactions&logoColor=white)](.github/workflows/)
+[![Grafana](https://img.shields.io/badge/Monitoring-Prometheus%20%2B%20Grafana-F46800?logo=grafana&logoColor=white)](k8s/monitoring/)
+[![Node.js](https://img.shields.io/badge/Node.js-24-339933?logo=nodedotjs&logoColor=white)](package.json)
+[![MongoDB](https://img.shields.io/badge/MongoDB-3.6-47A248?logo=mongodb&logoColor=white)](k8s/mongo.yaml)
 
 A demonstration app (Express API + MongoDB, jQuery/Bootstrap front end) for generating and persisting random names via `@faker-js/faker`. Originally forked from [`redhat-developer-demos/namegen`](https://github.com/reselbob/random-name-gen-app) (kept as the `upstream` remote).
 
 The app itself is a vehicle for the real project: **deploying it to AWS EKS (Auto Mode) with a full Terraform + GitHub Actions CI/CD pipeline.** This was a one-time practice deploy — built, demoed, screenshotted (see `screenshots/`), and fully torn down afterward to avoid ongoing AWS cost. See `docs/PLAN.md` for the full decision log if you have access to it (gitignored, local-only).
 
-## Architecture
+## 📑 Table of Contents
+
+- [🏗️ Architecture](#-architecture)
+- [🔄 CI/CD Pipeline](#-cicd-pipeline)
+- [💻 Local Development](#-local-development)
+- [☁️ AWS Deployment](#-aws-deployment)
+  - [1️⃣ Bootstrap the Terraform state backend](#1-bootstrap-the-terraform-state-backend)
+  - [2️⃣ Provision the infrastructure](#2-provision-the-infrastructure)
+  - [3️⃣ First image build + manual deploy](#3-first-image-build--manual-deploy)
+  - [4️⃣ Enable CI/CD](#4-enable-cicd)
+  - [5️⃣ Install monitoring (Prometheus + Grafana)](#5-install-monitoring-prometheus--grafana)
+- [🧹 Teardown](#-teardown)
+- [📁 Repo Layout](#-repo-layout)
+
+## 🏗️ Architecture
 
 Both diagrams below are also available as editable draw.io source in [`docs/architecture.drawio`](docs/architecture.drawio) — two pages, *Architecture* and *CI-CD Pipeline*, drawn with the official AWS architecture icon set and the Kubernetes icon set that ship with draw.io, plus embedded Terraform, Prometheus, and Grafana logos. Every icon is inlined, so the file needs no network access to render. The Mermaid versions are kept inline so the README renders on GitHub without opening anything.
 
@@ -44,7 +67,7 @@ flowchart TB
 - **Monitoring** is `kube-prometheus-stack` in a `monitoring` namespace: Prometheus scrapes cAdvisor and `kube-state-metrics`, and Grafana renders the namegen dashboard from `k8s/monitoring/` (see [step 5](#5-install-monitoring-prometheus--grafana)).
 - **GitHub Actions** authenticates to AWS via an OIDC-federated IAM role — no long-lived AWS access keys stored in GitHub.
 
-## CI/CD Pipeline
+## 🔄 CI/CD Pipeline
 
 ```mermaid
 flowchart LR
@@ -59,7 +82,7 @@ flowchart LR
 
 Defined in `.github/workflows/deploy.yml`. A separate `.github/workflows/test.yml` runs the Mocha test suite against a `mongo:3.6` service container on every push, independent of deploy.
 
-## Local Development
+## 💻 Local Development
 
 **Prerequisites**: Node.js, a running MongoDB instance (local or remote).
 
@@ -77,11 +100,11 @@ Defined in `.github/workflows/deploy.yml`. A separate `.github/workflows/test.ym
 npx mocha tests/*.js
 ```
 
-## AWS Deployment
+## ☁️ AWS Deployment
 
 Redeploying this from scratch requires: an AWS account, the AWS CLI, Terraform, `kubectl`, and Docker.
 
-### 1. Bootstrap the Terraform state backend
+### 1️⃣ Bootstrap the Terraform state backend
 
 Terraform's own state has to live somewhere before `terraform init` can use it as a backend, so this one step is created manually (not by Terraform):
 
@@ -101,7 +124,7 @@ No DynamoDB lock table is needed — the backend uses S3-native state locking (`
 
 Update the bucket name in `terraform/backend.tf` to match. Every other value (region, cluster name, Kubernetes version, CIDRs, the OIDC subject) is a variable in `terraform/variables.tf` — override the defaults there or with `-var`.
 
-### 2. Provision the infrastructure
+### 2️⃣ Provision the infrastructure
 
 ```bash
 cd terraform
@@ -116,7 +139,7 @@ aws eks update-kubeconfig --name namegen --region <region>
 kubectl get nodes   # Auto Mode provisions a node on-demand once something needs scheduling
 ```
 
-### 3. First image build + manual deploy
+### 3️⃣ First image build + manual deploy
 
 ```bash
 aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <ecr-repo-url>
@@ -133,11 +156,11 @@ Get the app's public URL:
 kubectl get svc namegen   # EXTERNAL-IP column is the NLB DNS name; app listens on :8080
 ```
 
-### 4. Enable CI/CD
+### 4️⃣ Enable CI/CD
 
 Push to `main` — `.github/workflows/deploy.yml` picks up from here automatically (build → push to ECR → roll out to EKS). No GitHub secrets are needed; the role ARN is embedded in the workflow and trust is scoped to this exact repo via OIDC.
 
-### 5. Install monitoring (Prometheus + Grafana)
+### 5️⃣ Install monitoring (Prometheus + Grafana)
 
 `kube-prometheus-stack` provides Prometheus, Grafana, `kube-state-metrics`, and `node-exporter`, plus a purpose-built dashboard for the namegen Deployment and the MongoDB StatefulSet.
 
@@ -165,7 +188,7 @@ Open <http://localhost:3000>, sign in as `admin`, then open **Dashboards → nam
 
 Apply `k8s/` before installing: the chart's PVCs need the `ebs-sc` StorageClass that `k8s/mongo.yaml` defines. Full details, panel descriptions, and cost notes are in [`k8s/monitoring/README.md`](k8s/monitoring/README.md).
 
-## Teardown
+## 🧹 Teardown
 
 Everything provisioned above is destroyable. `teardown.sh` (repo root) automates it in the required order — deleting the state backend or the IAM user too early will strand resources or lock you out of destroying them:
 
@@ -179,7 +202,7 @@ PVCs are deleted before `terraform destroy` on purpose. Their EBS volumes are pr
 
 After running it, spot-check the AWS Console (EKS, EC2/ELB, ECR, S3, IAM, and Billing/Cost Explorer) to confirm nothing billable is left.
 
-## Repo Layout
+## 📁 Repo Layout
 
 - `server.js`, `data/`, `public/` — the app itself
 - `Dockerfile` — container build (`node:24-alpine`, non-root)
