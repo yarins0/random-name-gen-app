@@ -6,6 +6,8 @@ The app itself is a vehicle for the real project: **deploying it to AWS EKS (Aut
 
 ## Architecture
 
+Both diagrams below are also available as editable draw.io source in [`docs/architecture.drawio`](docs/architecture.drawio) — two pages, *Architecture* and *CI-CD Pipeline*, drawn with the official AWS architecture icon set and the Kubernetes icon set that ship with draw.io, plus embedded Terraform, Prometheus, and Grafana logos. Every icon is inlined, so the file needs no network access to render. The Mermaid versions are kept inline so the README renders on GitHub without opening anything.
+
 ```mermaid
 flowchart TB
     subgraph AWS["AWS (eu-north-1)"]
@@ -15,6 +17,13 @@ flowchart TB
                 App["namegen Deployment<br/>(pod, port 8080)"]
                 Mongo["mongo StatefulSet<br/>+ PVC (EBS gp3)"]
                 App -->|"mongodb://mongo:27017"| Mongo
+                subgraph Mon["namespace: monitoring"]
+                    Prom["Prometheus<br/>+ PVC (EBS gp3)"]
+                    Graf["Grafana<br/>namegen dashboard"]
+                    Graf -->|"query"| Prom
+                end
+                Prom -.->|"scrape"| App
+                Prom -.->|"scrape"| Mongo
             end
             NLB --> App
         end
@@ -32,6 +41,7 @@ flowchart TB
 - **Node.js app** (`server.js`) serves the static front end (`public/index.html`) and the `/api/*` routes from the same process.
 - **MongoDB** runs as a single-replica `StatefulSet` with an EBS-backed `PersistentVolumeClaim` (see `k8s/mongo.yaml` — Auto Mode needs its own `StorageClass`, the default `gp2` in-tree class isn't usable on Auto Mode nodes).
 - **Exposure** is a Kubernetes `Service` of type `LoadBalancer`, using EKS Auto Mode's built-in NLB provisioning (no separate AWS Load Balancer Controller installed).
+- **Monitoring** is `kube-prometheus-stack` in a `monitoring` namespace: Prometheus scrapes cAdvisor and `kube-state-metrics`, and Grafana renders the namegen dashboard from `k8s/monitoring/` (see [step 5](#5-install-monitoring-prometheus--grafana)).
 - **GitHub Actions** authenticates to AWS via an OIDC-federated IAM role — no long-lived AWS access keys stored in GitHub.
 
 ## CI/CD Pipeline
@@ -127,6 +137,34 @@ kubectl get svc namegen   # EXTERNAL-IP column is the NLB DNS name; app listens 
 
 Push to `main` — `.github/workflows/deploy.yml` picks up from here automatically (build → push to ECR → roll out to EKS). No GitHub secrets are needed; the role ARN is embedded in the workflow and trust is scoped to this exact repo via OIDC.
 
+### 5. Install monitoring (Prometheus + Grafana)
+
+`kube-prometheus-stack` provides Prometheus, Grafana, `kube-state-metrics`, and `node-exporter`, plus a purpose-built dashboard for the namegen Deployment and the MongoDB StatefulSet.
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+helm install monitoring prometheus-community/kube-prometheus-stack \
+  --namespace monitoring --create-namespace \
+  --values k8s/monitoring/values.yaml \
+  --set grafana.adminPassword='<choose-a-password>'
+
+kubectl create configmap namegen-dashboard --namespace monitoring \
+  --from-file=k8s/monitoring/namegen-dashboard.json
+kubectl label configmap namegen-dashboard --namespace monitoring grafana_dashboard=1
+```
+
+Grafana stays on a ClusterIP Service, so reach it through a port-forward rather than a second public load balancer:
+
+```bash
+kubectl port-forward --namespace monitoring svc/monitoring-grafana 3000:80
+```
+
+Open <http://localhost:3000>, sign in as `admin`, then open **Dashboards → namegen — Application & MongoDB**.
+
+Apply `k8s/` before installing: the chart's PVCs need the `ebs-sc` StorageClass that `k8s/mongo.yaml` defines. Full details, panel descriptions, and cost notes are in [`k8s/monitoring/README.md`](k8s/monitoring/README.md).
+
 ## Teardown
 
 Everything provisioned above is destroyable. `teardown.sh` (repo root) automates it in the required order — deleting the state backend or the IAM user too early will strand resources or lock you out of destroying them:
@@ -135,7 +173,9 @@ Everything provisioned above is destroyable. `teardown.sh` (repo root) automates
 ./teardown.sh   # prompts for confirmation before doing anything
 ```
 
-Order: delete the `LoadBalancer` Service (deprovisions the NLB) → `terraform destroy` (cluster, VPC, ECR, OIDC role) → empty + delete the S3 state bucket → delete the bootstrap IAM user's access key and the user itself.
+Order: delete the `LoadBalancer` Service (deprovisions the NLB) → uninstall the monitoring stack → delete all PVCs → `terraform destroy` (cluster, VPC, ECR, OIDC role) → empty + delete the S3 state bucket → delete the bootstrap IAM user's access key and the user itself.
+
+PVCs are deleted before `terraform destroy` on purpose. Their EBS volumes are provisioned by the CSI driver rather than by Terraform, so destroying the cluster while PVCs still exist orphans those volumes and they keep billing. Check **EC2 → Volumes** afterwards.
 
 After running it, spot-check the AWS Console (EKS, EC2/ELB, ECR, S3, IAM, and Billing/Cost Explorer) to confirm nothing billable is left.
 
@@ -145,6 +185,8 @@ After running it, spot-check the AWS Console (EKS, EC2/ELB, ECR, S3, IAM, and Bi
 - `Dockerfile` — container build (`node:24-alpine`, non-root)
 - `terraform/` — all AWS infrastructure (VPC, EKS, ECR, OIDC/IAM, remote state backend config)
 - `k8s/` — Kubernetes manifests (app `Deployment`/`Service`, Mongo `StatefulSet`/`PVC`, `Secret`)
+- `k8s/monitoring/` — Prometheus + Grafana Helm values and the namegen Grafana dashboard
+- `docs/architecture.drawio` — editable draw.io source for both diagrams (open at [app.diagrams.net](https://app.diagrams.net))
 - `.github/workflows/` — CI (`test.yml`) and CD (`deploy.yml`)
 - `screenshots/` — app UI states, EKS/ECR/NLB console views, and pipeline run logs
 - `teardown.sh` — Phase 5 automation (see above)
