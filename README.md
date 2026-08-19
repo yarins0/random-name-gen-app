@@ -29,37 +29,9 @@ The app itself is a vehicle for the real project: **deploying it to AWS EKS (Aut
 
 ## 🏗️ Architecture
 
-Both diagrams below are also available as editable draw.io source in [`docs/architecture.drawio`](docs/architecture.drawio) — two pages, *Architecture* and *CI-CD Pipeline*, drawn with the official AWS architecture icon set and the Kubernetes icon set that ship with draw.io, plus embedded Terraform, Prometheus, and Grafana logos. Every icon is inlined, so the file needs no network access to render. The Mermaid versions are kept inline so the README renders on GitHub without opening anything.
+Both diagrams below are exported from [`docs/architecture.drawio`](docs/architecture.drawio), the editable draw.io source — two pages, *Architecture* and *CI-CD Pipeline*, drawn with the official AWS architecture icon set and the Kubernetes icon set that ship with draw.io, plus embedded Terraform, Prometheus, and Grafana logos. Every icon is inlined, so the file needs no network access to render. Edit that file and re-export to PNG to change either diagram.
 
-```mermaid
-flowchart TB
-    subgraph AWS["AWS (eu-north-1)"]
-        subgraph VPC["VPC — 2 public subnets, no NAT"]
-            NLB["Network Load Balancer<br/>(EKS Auto Mode-provisioned)"]
-            subgraph EKS["EKS Cluster — Auto Mode"]
-                App["namegen Deployment<br/>(pod, port 8080)"]
-                Mongo["mongo StatefulSet<br/>+ PVC (EBS gp3)"]
-                App -->|"mongodb://mongo:27017"| Mongo
-                subgraph Mon["namespace: monitoring"]
-                    Prom["Prometheus<br/>+ PVC (EBS gp3)"]
-                    Graf["Grafana<br/>namegen dashboard"]
-                    Graf -->|"query"| Prom
-                end
-                Prom -.->|"scrape"| App
-                Prom -.->|"scrape"| Mongo
-            end
-            NLB --> App
-        end
-        ECR["ECR repo: namegen"]
-        OIDC["IAM Role: namegen-github-actions-deploy<br/>(OIDC federated, no stored keys)"]
-        TFState["S3<br/>Terraform remote state<br/>(native locking)"]
-    end
-    User(["Browser"]) -->|":8080"| NLB
-    ECR -.->|"image pull"| App
-
-    classDef aws fill:#232f3e,stroke:#ff9900,color:#fff
-    class EKS,VPC,AWS aws
-```
+![Architecture: a browser reaching an EKS Auto Mode cluster through a Network Load Balancer, with the namegen Deployment, the mongo StatefulSet on an EBS volume, a monitoring namespace running Prometheus and Grafana, plus ECR, the GitHub Actions OIDC role, and the S3 Terraform state bucket](screenshots/draw.io/Architecture.png)
 
 - **Node.js app** (`server.js`) serves the static front end (`public/index.html`) and the `/api/*` routes from the same process.
 - **MongoDB** runs as a single-replica `StatefulSet` with an EBS-backed `PersistentVolumeClaim` (see `k8s/mongo.yaml` — Auto Mode needs its own `StorageClass`, the default `gp2` in-tree class isn't usable on Auto Mode nodes).
@@ -69,16 +41,7 @@ flowchart TB
 
 ## 🔄 CI/CD Pipeline
 
-```mermaid
-flowchart LR
-    Push["git push to main"] --> Checkout["Checkout code"]
-    Checkout --> AuthAWS["Assume AWS IAM role<br/>via GitHub OIDC"]
-    AuthAWS --> Build["docker build<br/>tag: :$GITHUB_SHA, :latest"]
-    Build --> PushECR["Push image to ECR"]
-    PushECR --> Kubeconfig["aws eks update-kubeconfig"]
-    Kubeconfig --> Rollout["kubectl set image<br/>deployment/namegen"]
-    Rollout --> Verify["kubectl rollout status"]
-```
+![CI/CD pipeline: a push to main triggers checkout, assuming the AWS IAM role through GitHub OIDC, docker build tagged with the commit SHA and latest, push to ECR, aws eks update-kubeconfig, kubectl set image, and kubectl rollout status](screenshots/draw.io/CI-CD%20Pipeline.png)
 
 Defined in `.github/workflows/deploy.yml`. A separate `.github/workflows/test.yml` runs the Mocha test suite against a `mongo:3.6` service container on every push, independent of deploy.
 
@@ -211,5 +174,6 @@ After running it, spot-check the AWS Console (EKS, EC2/ELB, ECR, S3, IAM, and Bi
 - `k8s/monitoring/` — Prometheus + Grafana Helm values and the namegen Grafana dashboard
 - `docs/architecture.drawio` — editable draw.io source for both diagrams (open at [app.diagrams.net](https://app.diagrams.net))
 - `.github/workflows/` — CI (`test.yml`) and CD (`deploy.yml`)
-- `screenshots/` — app UI states, EKS/ECR/NLB console views, and pipeline run logs
+- `screenshots/` — app UI states, EKS/ECR/NLB console views, Grafana/Prometheus views, and pipeline run logs
+- `screenshots/draw.io/` — the two diagrams above, exported to PNG from `docs/architecture.drawio`
 - `teardown.sh` — Phase 5 automation (see above)
