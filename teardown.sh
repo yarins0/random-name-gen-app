@@ -33,11 +33,21 @@ fi
 
 # EBS volumes for dynamically provisioned PVCs are created by the CSI driver, not by
 # Terraform, so `terraform destroy` does not know about them. Deleting the cluster with
-# PVCs still present orphans their volumes, which keep billing indefinitely. Delete the
-# PVCs while the cluster is alive so the CSI driver reclaims the volumes first.
-echo "==> Deleting PersistentVolumeClaims so their EBS volumes are reclaimed (not orphaned)"
-kubectl delete pvc --all --namespace "$MONITORING_NS" --ignore-not-found --timeout=5m || true
-kubectl delete pvc --all --namespace default --ignore-not-found --timeout=5m || true
+# PVCs still present orphans their volumes, which keep billing indefinitely.
+#
+# Workloads must go before their PVCs. A running pod holds its PVC open through the
+# kubernetes.io/pvc-protection finalizer, so `delete pvc` only blocks until the timeout
+# and the volume outlives the cluster. Deleting the PVCs alone orphaned the mongo-0
+# volume on a real run, which is the exact failure this section exists to prevent.
+echo "==> Deleting workloads, then their PVCs, so the CSI driver reclaims the EBS volumes"
+for NS in default "$MONITORING_NS"; do
+  kubectl get namespace "$NS" >/dev/null 2>&1 || continue
+  kubectl delete statefulset,deployment --all --namespace "$NS" --timeout=5m
+  # No `|| true` here on purpose: a timeout means a volume is about to be orphaned and
+  # bill indefinitely, so stop before terraform destroy removes the CSI driver that
+  # would have reclaimed it. Swallowing this error is what let the leak through before.
+  kubectl delete pvc --all --namespace "$NS" --timeout=5m
+done
 kubectl delete namespace "$MONITORING_NS" --ignore-not-found --timeout=5m || true
 
 echo "==> terraform destroy (cluster, VPC, ECR repo, and any OIDC/IAM role Phase 3 added to this state)"
@@ -67,21 +77,31 @@ if [[ "$(echo "$MARKERS_JSON" | grep -c '"Key"')" -gt 0 ]]; then
 fi
 aws s3api delete-bucket --bucket "$TFSTATE_BUCKET" --region "$REGION"
 
-echo "==> Removing $IAM_USER from any IAM groups (delete-user requires zero group memberships)"
-for GROUP in $(aws iam list-groups-for-user --user-name "$IAM_USER" --query 'Groups[].GroupName' --output text); do
-  aws iam remove-user-from-group --user-name "$IAM_USER" --group-name "$GROUP"
-done
+echo "==> Last: delete the $IAM_USER IAM user (the identity running everything above)"
+# delete-user requires zero group memberships, but removing the user from its groups also
+# takes away every permission granted through them — including the permission to delete
+# itself. A real run did exactly that: the group removal succeeded, then list-access-keys
+# and delete-user both failed with AccessDenied, leaving the user behind and the local
+# credentials unable to verify anything. So refuse to start a sequence that cannot finish.
+USER_GROUPS=$(aws iam list-groups-for-user --user-name "$IAM_USER" \
+  --query 'Groups[].GroupName' --output text 2>/dev/null || echo "")
+if [[ -n "$USER_GROUPS" ]]; then
+  echo "WARNING: $IAM_USER belongs to IAM group(s): $USER_GROUPS"
+  echo "         Removing it from them would revoke the permissions needed to delete it,"
+  echo "         so this script stops here instead of stripping its own access."
+  echo "         Finish in the AWS IAM console with an admin identity: delete this user's"
+  echo "         access keys, then delete the user."
+  exit 1
+fi
 
-echo "==> Deleting the namegen-terraform IAM user's access key(s), then the user itself (last step — this is the identity running everything above)"
-# ponytail: if these are the AWS CLI's own active credentials, deleting the access key
-# invalidates every call after it — including delete-user itself — so this can fail here
-# even with nothing left actually wrong. If it does, finish manually in the IAM console:
-# delete the user's remaining access key(s) (if any), then delete the user.
-for KEY_ID in $(aws iam list-access-keys --user-name "$IAM_USER" --query 'AccessKeyMetadata[].AccessKeyId' --output text); do
+# No groups, so permissions are attached directly and survive until the user is deleted.
+# Deleting the access key still invalidates this session's credentials, so it goes last.
+for KEY_ID in $(aws iam list-access-keys --user-name "$IAM_USER" \
+  --query 'AccessKeyMetadata[].AccessKeyId' --output text); do
   aws iam delete-access-key --user-name "$IAM_USER" --access-key-id "$KEY_ID"
 done
 if ! aws iam delete-user --user-name "$IAM_USER" 2>/tmp/namegen-delete-user-err.log; then
-  echo "WARNING: could not delete IAM user $IAM_USER automatically — its own access key was likely just revoked, invalidating this session's credentials. Finish manually in the AWS IAM console (delete any remaining access keys, then delete the user):"
+  echo "WARNING: could not delete IAM user $IAM_USER automatically. Finish it in the AWS IAM console (delete any remaining access keys, then the user):"
   cat /tmp/namegen-delete-user-err.log
   rm -f /tmp/namegen-delete-user-err.log
   exit 1
