@@ -18,6 +18,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: mongo
+  namespace: namegen
 spec:
   clusterIP: None
   selector:
@@ -30,6 +31,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: mongo
+  namespace: namegen
 spec:
   serviceName: mongo
   replicas: 1
@@ -41,14 +43,47 @@ spec:
       labels:
         app: mongo
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # Running as non-root from the start makes the official image's entrypoint skip its
+        # root-only chown + gosu step. fsGroup gives this uid write access to the EBS volume.
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: mongo
-          image: mongo:3.6
+          # 3.6 went end-of-life in 2021. 8.0 is the current major release line, and its image had
+          # the fewest Trivy findings of the 8.x tags. A fresh volume is assumed: mongod can't open a
+          # 3.6 data directory directly, it has to step through every major version in between.
+          image: mongo:8.0
           ports:
             - containerPort: 27017
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              # mongod sizes its WiredTiger cache from this cgroup limit (max(256 MB, 50% of (limit - 1 GB))).
+              memory: 1Gi
           volumeMounts:
             - name: mongo-data
               mountPath: /data/db
+            # mongod creates its unix socket in /tmp, which readOnlyRootFilesystem would otherwise block.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
   volumeClaimTemplates:
     - metadata:
         name: mongo-data

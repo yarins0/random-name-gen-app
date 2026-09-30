@@ -22,8 +22,8 @@
         },
         "query": "label_values(kube_pod_info, namespace)",
         "current": {
-          "text": "default",
-          "value": "default"
+          "text": "namegen",
+          "value": "namegen"
         },
         "refresh": 1,
         "includeAll": false,

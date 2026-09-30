@@ -15,7 +15,7 @@ the cluster with no change to the application image.
 
 Eight panels covering both workloads: available replicas, container restarts, running pod
 count, MongoDB PVC utilisation (gauge and time series), CPU and memory per pod, and network
-throughput for the app pods. A `namespace` variable at the top defaults to `default`.
+throughput for the app pods. A `namespace` variable at the top defaults to `namegen`.
 
 Metrics come from cAdvisor and `kube-state-metrics`, so the panels are infrastructure-level.
 The Express app exposes no `/metrics` endpoint, so request rate and latency per route are not
@@ -26,11 +26,7 @@ ServiceMonitor is picked up automatically.
 ## Prerequisites
 
 The `ebs-sc` StorageClass must exist before installing. It is defined in `k8s/mongo.yaml`, so
-apply the app manifests first:
-
-```bash
-kubectl apply -f k8s/
-```
+deploy the app first (see [step 3 of the main README](../../README.md#3-first-image-build--manual-deploy)).
 
 Without it, the Prometheus and Grafana PVCs sit in `Pending` forever — EKS Auto Mode ships no
 usable StorageClass of its own.

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: namegen
+  labels:
+    # Pod Security Admission rejects any pod in this namespace that doesn't meet the
+    # "restricted" profile (non-root, no privilege escalation, all capabilities dropped,
+    # RuntimeDefault seccomp), so the hardening in app.yaml/mongo.yaml can't silently regress.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

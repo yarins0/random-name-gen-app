@@ -13,6 +13,12 @@ module "vpc" {
   enable_nat_gateway      = false
   map_public_ip_on_launch = true
 
+  # With nodes in public subnets, flow logs are the record of what actually reached them.
+  enable_flow_log                                 = true
+  create_flow_log_cloudwatch_log_group            = true
+  create_flow_log_cloudwatch_iam_role             = true
+  flow_log_cloudwatch_log_group_retention_in_days = 30
+
   # EKS Auto Mode discovers subnets to place nodes/load balancers in via these tags.
   public_subnet_tags = {
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"

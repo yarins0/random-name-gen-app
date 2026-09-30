@@ -12,6 +12,7 @@ set -euo pipefail
 
 REGION="eu-north-1"
 CLUSTER_NAME="namegen"
+APP_NS="namegen"
 APP_SERVICE="namegen"
 MONITORING_NS="monitoring"
 TFSTATE_BUCKET="namegen-tfstate-592404497449"
@@ -24,7 +25,7 @@ if [[ "$CONFIRM" != "destroy" ]]; then
 fi
 
 echo "==> Deleting the app's LoadBalancer Service first, so the NLB deprovisions before the cluster does"
-kubectl delete svc "$APP_SERVICE" --ignore-not-found
+kubectl delete svc "$APP_SERVICE" --namespace "$APP_NS" --ignore-not-found
 
 echo "==> Removing the Prometheus/Grafana stack, if it is installed"
 if command -v helm >/dev/null 2>&1; then
@@ -40,7 +41,7 @@ fi
 # and the volume outlives the cluster. Deleting the PVCs alone orphaned the mongo-0
 # volume on a real run, which is the exact failure this section exists to prevent.
 echo "==> Deleting workloads, then their PVCs, so the CSI driver reclaims the EBS volumes"
-for NS in default "$MONITORING_NS"; do
+for NS in "$APP_NS" "$MONITORING_NS"; do
   kubectl get namespace "$NS" >/dev/null 2>&1 || continue
   kubectl delete statefulset,deployment --all --namespace "$NS" --timeout=5m
   # No `|| true` here on purpose: a timeout means a volume is about to be orphaned and
@@ -48,7 +49,7 @@ for NS in default "$MONITORING_NS"; do
   # would have reclaimed it. Swallowing this error is what let the leak through before.
   kubectl delete pvc --all --namespace "$NS" --timeout=5m
 done
-kubectl delete namespace "$MONITORING_NS" --ignore-not-found --timeout=5m || true
+kubectl delete namespace "$APP_NS" "$MONITORING_NS" --ignore-not-found --timeout=5m || true
 
 echo "==> terraform destroy (cluster, VPC, ECR repo, and any OIDC/IAM role Phase 3 added to this state)"
 (cd terraform && terraform destroy -auto-approve)

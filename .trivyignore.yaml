@@ -1,0 +1,29 @@
+# Accepted Trivy findings. Every entry is a deliberate trade-off, not a silenced alarm:
+# each one says why it is accepted and what would have to change to fix it for real.
+# Loaded automatically through trivy.yaml, both in CI and for a local `trivy` run.
+
+misconfigurations:
+  - id: AWS-0040
+    statement: >-
+      Public EKS API endpoint. deploy.yml runs kubectl from GitHub-hosted runners, which have no
+      fixed IPs and no route into the VPC, and there is no VPN or bastion for laptop access either.
+      Every request still needs valid AWS IAM credentials mapped to an EKS access entry.
+      Real fix: private endpoint plus a CD runner inside the VPC.
+
+  - id: AWS-0041
+    statement: >-
+      Endpoint allowlist is 0.0.0.0/0 for the same reason as AWS-0040: GitHub-hosted runner IPs
+      span most of Azure's address space, so any narrower list breaks CD. Narrow
+      var.cluster_endpoint_public_access_cidrs if CD moves to a runner with a known egress IP.
+
+  - id: AWS-0164
+    statement: >-
+      Nodes sit in public subnets with public IPs because the VPC has no NAT gateway (~$35/month
+      each, for a cluster that was built, demoed and torn down). Security groups still gate all
+      inbound traffic and VPC flow logs record it. Real fix: private subnets plus a NAT gateway.
+
+  - id: AWS-0033
+    statement: >-
+      ECR images are already encrypted at rest with AWS-managed AES-256. A customer-managed KMS
+      key adds a billable key and KMS grant plumbing for key-policy control this single-account
+      demo doesn't use.

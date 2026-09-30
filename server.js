@@ -21,7 +21,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const port = process.env.SERVER_PORT || 8080;
 const getRandomNameSync = () => {
-    return {firstName: faker.name.firstName(), lastName: faker.name.lastName()}
+    return {firstName: faker.person.firstName(), lastName: faker.person.lastName()}
 };
 
 app.get('/api/connection', async (req, res) => {

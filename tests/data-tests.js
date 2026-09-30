@@ -23,8 +23,8 @@ describe('Data Tests', () => {
     }).timeout(5000);
 
     it('Can create Person to DB', async () => {
-        const firstName = faker.name.firstName();
-        const lastName = faker.name.firstName();
+        const firstName = faker.person.firstName();
+        const lastName = faker.person.firstName();
 
         await setPerson({firstName,lastName})
             .catch(e => {
