@@ -16,6 +16,14 @@ module "eks" {
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.public_subnets
 
+  # The module's node security group is only attached to managed/self-managed node groups.
+  # Auto Mode's built-in node pools use the EKS-created cluster security group instead, so it
+  # would sit unused (while still tripping Trivy's AWS-0104 for its allow-all egress rule).
+  create_node_security_group = false
+
+  # Module default is api/audit/authenticator; controllerManager + scheduler complete the set.
+  enabled_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
   # Auto Mode: EKS manages node provisioning/scaling itself, no aws_eks_node_group needed.
   compute_config = {
     enabled    = true

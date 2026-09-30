@@ -4,17 +4,16 @@ resource "aws_ecr_repository" "namegen" {
   name         = var.ecr_repository_name
   force_delete = true
 
-  # Stays MUTABLE on purpose: .github/workflows/deploy.yml pushes a moving `:latest`
-  # tag alongside the immutable `:$GITHUB_SHA` tag. IMMUTABLE would reject the second
-  # `:latest` push and break the pipeline.
-  image_tag_mutability = "MUTABLE"
+  # IMMUTABLE: once pushed, a tag can never be re-pointed at a different image. deploy.yml
+  # only pushes `:$GITHUB_SHA` (no moving `:latest`), so every tag maps to exactly one commit.
+  image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true
   }
 }
 
-# Untagged layers are orphaned by each `:latest` re-push and bill as storage forever.
+# Untagged images (e.g. left behind by an interrupted push) bill as storage forever.
 # Only untagged images expire — SHA-tagged images are left alone so a rollback target
 # and the currently-running image can never be deleted out from under the cluster.
 resource "aws_ecr_lifecycle_policy" "namegen" {

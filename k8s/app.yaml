@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: namegen
+  namespace: namegen
 spec:
   replicas: 1
   selector:
@@ -12,19 +13,45 @@ spec:
       labels:
         app: namegen
     spec:
+      # The app never talks to the Kubernetes API, so it gets no service account token.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # Explicit numeric IDs (the image's USER is the name "node", which the kubelet can't
+        # verify as non-root). Above 10000 so they can't collide with a real user on the node.
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: namegen
-          image: 592404497449.dkr.ecr.eu-north-1.amazonaws.com/namegen:latest
+          # IMAGE_TAG is a placeholder, never deployed as-is: deploy.yml (and README step 3)
+          # substitute the commit SHA the image was pushed under before applying this file.
+          image: 592404497449.dkr.ecr.eu-north-1.amazonaws.com/namegen:IMAGE_TAG
           ports:
             - containerPort: 8080
           envFrom:
             - secretRef:
                 name: namegen-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            # The app writes nothing to disk (logs go to stdout), so no writable volume is needed.
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: namegen
+  namespace: namegen
   annotations:
     # EKS Auto Mode built-in load-balancing capability (not the standalone AWS LB Controller add-on).
     # Confirmed against AWS docs: https://docs.aws.amazon.com/eks/latest/userguide/auto-configure-nlb.html

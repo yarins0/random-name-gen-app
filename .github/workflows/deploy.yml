@@ -5,7 +5,6 @@ on:
     branches: [main]
 
 permissions:
-  id-token: write
   contents: read
 
 env:
@@ -14,30 +13,75 @@ env:
   EKS_CLUSTER_NAME: namegen
 
 jobs:
-  deploy:
+  # Build and scan in a job with no cloud access (no id-token permission, no AWS credentials),
+  # so the scanner and the build never run where deploy secrets exist. The scanned image is
+  # handed to the deploy job as a tarball: what ships is byte-for-byte what was scanned.
+  build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - name: Build image
+        run: docker build -t $ECR_REPOSITORY:$GITHUB_SHA .
+
+      # The deploy gate: fixable HIGH/CRITICAL vulnerabilities or leaked secrets stop the release.
+      - name: Scan image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: ${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Export image
+        run: docker save $ECR_REPOSITORY:$GITHUB_SHA -o image.tar
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image
+          path: image.tar
+          retention-days: 1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: image
+
+      - name: Load scanned image
+        run: docker load -i image.tar
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: arn:aws:iam::592404497449:role/namegen-github-actions-deploy
           aws-region: ${{ env.AWS_REGION }}
 
-      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
-      - name: Build and push image
-        run: |
-          docker build -t $ECR_REPOSITORY:$GITHUB_SHA -t $ECR_REPOSITORY:latest .
-          docker push $ECR_REPOSITORY:$GITHUB_SHA
-          docker push $ECR_REPOSITORY:latest
+      # Only the commit-SHA tag: the ECR repo is IMMUTABLE, so a moving :latest can't be re-pushed.
+      - name: Push image
+        run: docker push $ECR_REPOSITORY:$GITHUB_SHA
 
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION
 
-      # Tagged with $GITHUB_SHA (not just :latest) so this actually changes the pod spec
-      # and triggers a real rollout, instead of a no-op image reference update.
+      # Applies the whole manifest (not just `kubectl set image`) so changes to k8s/app.yaml,
+      # such as its securityContext, ship with the image. The new SHA tag changes the pod spec,
+      # which triggers a real rollout.
       - name: Roll out new image
         run: |
-          kubectl set image deployment/namegen namegen=$ECR_REPOSITORY:$GITHUB_SHA
-          kubectl rollout status deployment/namegen
+          sed "s|:IMAGE_TAG|:$GITHUB_SHA|" k8s/app.yaml | kubectl apply -f -
+          kubectl rollout status deployment/namegen --namespace namegen

@@ -1,0 +1,2 @@
+# Trivy loads ./trivy.yaml automatically, so CI and local runs share the same accepted-risk list.
+ignorefile: .trivyignore.yaml
